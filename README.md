@@ -4,6 +4,30 @@ This project reads a CSV of companies and contacts, cleans the data, creates **l
 
 ---
 
+## How it works
+
+This section is a plain-language walkthrough of what the code does—useful if you are reviewing the project without reading the source.
+
+**Dropping or fixing bad rows**
+
+- **Skip unusable rows:** empty company name, or no contact identity (no name and no usable email or phone).
+- **Emails:** split out; only addresses that look valid are kept; obvious placeholders are dropped.
+- **Phones:** one number per line; junk or placeholder lines are skipped; a line needs enough digits to count as a real number.
+- **Company founded:** must be a day-month-year value that converts to a valid calendar date, or it is treated as missing.
+- **Company revenue:** parsed from typical currency text; if it cannot be read, it is left empty.
+- **Same company, multiple rows:** contacts are merged under one company; company-level fields use the first non-empty value; if later rows disagree, the first value wins and a warning is logged.
+
+**Default files (you can override these with flags)**  
+Unless you pass custom paths, the script reads the sample CSV under `src/data/input/`, writes the cleaned copy to `src/data/normalized/normalized_import.csv`, and writes the state report to `src/data/output/report_<start-date>_<end-date>.csv` (the filename includes the founded-date range you pass in).
+
+**How every lead in the report is found**  
+The script creates **one Close lead per distinct company** in the cleaned file, with all contacts on that lead. For the report it does **not** only look at those new leads: it asks Close for **all leads in your account** whose **Company Founded** custom field falls between your `--start-date` and `--end-date`, and follows pagination until there are no more results. Search can lag a few seconds behind new data, so any lead just created in this run that does not show up in search yet is **added from the import step** so the report still includes them.
+
+**States and “most revenue”**  
+Leads in that date window are grouped by **Company US State**. For each state, the CSV lists how many leads there are, the **total** revenue, the **median** revenue, and the **name of the lead with the highest revenue** in that state (missing revenue is treated as zero when comparing and when summing). Leads with a blank state are skipped in the report by default; use **`--include-no-state`** ([optional flags](#optional-command-line-flags)) if you want them in a single **`(no state)`** row.
+
+---
+
 ## What you need
 
 - **Python 3.10+** (3.11+ recommended)
@@ -29,6 +53,8 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 ```
 
 ### 3. Install dependencies
+
+Install the libraries the script needs (`requests` for the Close API, `python-dotenv` to load `.env`). They are pinned in `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
@@ -60,7 +86,7 @@ The script will:
 2. Normalize rows and write a cleaned CSV.
 3. Ensure the required lead custom fields exist in Close (or use existing ones).
 4. Create one lead per company in your Close organization.
-5. After a short pause, search Close **org-wide** for leads in that founded-date range, merge with this run’s imports (covers search lag), and write the state report (default filename includes the date range; blank-state leads omitted unless you pass **`--include-no-state`**).
+5. After a short pause, search Close **org-wide** for leads in that founded-date range, merge with this run’s imports (covers search lag), and write the state report (default filename includes the date range).
 
 ### 6. Find your outputs
 
