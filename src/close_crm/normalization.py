@@ -29,6 +29,7 @@ def title_case_name(s: str) -> str:
 
 
 def parse_emails(raw: str | None) -> list[str]:
+    """Split on whitespace/commas/semicolons; keep valid-looking emails; dedupe case-insensitively."""
     if not raw or not str(raw).strip():
         return []
     seen: set[str] = set()
@@ -46,6 +47,7 @@ def parse_emails(raw: str | None) -> list[str]:
 
 
 def parse_phones(raw: str | None) -> list[str]:
+    """One phone per line; strip noise; skip junk; require enough digits; dedupe."""
     if not raw or not str(raw).strip():
         return []
     lines = re.split(r"[\r\n]+", str(raw))
@@ -71,10 +73,7 @@ def parse_phones(raw: str | None) -> list[str]:
 
 
 def format_phone_for_close(phone: str) -> str:
-    """
-    Close validates contact phones strictly (E.164-style: + and digits).
-    Hyphenated numbers like +86-173-158-4533 may be rejected; normalize before POST.
-    """
+    """Normalize to +<digits> for API validation (strips hyphens/spaces after the +)."""
     s = phone.strip()
     if not s:
         return s
@@ -85,6 +84,7 @@ def format_phone_for_close(phone: str) -> str:
 
 
 def parse_money(raw: str | None) -> float | None:
+    """Parse currency-like strings; return None if empty or unparseable."""
     if raw is None:
         return None
     s = str(raw).strip()
@@ -117,6 +117,8 @@ def parse_founded(raw: str | None) -> str | None:
 
 @dataclass
 class CleanRow:
+    """One validated CSV row: company, contact, channels, and custom-field values."""
+
     company: str
     contact_name: str
     emails: list[str]
@@ -127,6 +129,7 @@ class CleanRow:
 
 
 def normalize_row(row: dict[str, str], row_num: int) -> CleanRow | None:
+    """Map a CSV row to CleanRow; return None if company empty or no contact identity."""
     company = (row.get("Company") or "").strip()
     if not company:
         LOG.warning("Row %s: discarded — empty company", row_num)
@@ -162,6 +165,8 @@ def normalize_row(row: dict[str, str], row_num: int) -> CleanRow | None:
 
 @dataclass
 class ContactPayload:
+    """Single contact nested under a grouped company."""
+
     name: str
     emails: list[str]
     phones: list[str]
@@ -169,6 +174,8 @@ class ContactPayload:
 
 @dataclass
 class GroupedCompany:
+    """One company with merged contacts and first-seen custom values (conflicts logged)."""
+
     display_name: str
     contacts: list[ContactPayload] = field(default_factory=list)
     founded: str | None = None
@@ -177,4 +184,5 @@ class GroupedCompany:
 
 
 def normalize_field_key(name: str) -> str:
+    """Compare Close custom field names case-insensitively."""
     return name.strip().casefold()

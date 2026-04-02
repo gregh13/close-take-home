@@ -1,1 +1,1 @@
-"""Close CRM CSV import, API client, and reporting."""
+"""Close CRM: CSV normalization, REST client, lead import, search, and state report."""

@@ -15,5 +15,6 @@ def parse_iso_date(s: str) -> date:
 
 
 def validate_date_range(start: date, end: date) -> None:
+    """Raise ValueError if start is after end (inclusive range expected)."""
     if start > end:
         raise ValueError(f"start date {start} must be on or before end date {end}")

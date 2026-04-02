@@ -16,6 +16,7 @@ from close_crm.importer import ImportedLeadSnapshot
 
 
 def _custom_key(field_id: str) -> str:
+    """API key for a custom field value on a lead row: custom.<cf_id>."""
     return f"custom.{field_id}" if not field_id.startswith("custom.") else field_id
 
 
@@ -24,6 +25,7 @@ def _lead_revenue_state(
     revenue_id: str,
     state_id: str,
 ) -> tuple[float | None, str | None]:
+    """Read revenue (number) and state (text) from search result row by field ids."""
     rev_key = _custom_key(revenue_id)
     st_key = _custom_key(state_id)
     rev = lead.get(rev_key)
@@ -50,7 +52,7 @@ def build_search_body(
     cursor: str | None,
     limit: int = 200,
 ) -> dict[str, Any]:
-    """JSON body for POST /data/search/ (logged for debugging)."""
+    """Build Advanced Search body: leads whose *Company Founded* custom date falls in [start, end]."""
     return {
         "query": {
             "type": "and",
@@ -97,6 +99,7 @@ class LeadReporter:
     """Search leads in date range and write state aggregation CSV."""
 
     def __init__(self, revenue_field_id: str, state_field_id: str) -> None:
+        """Ids for custom fields used when reading search rows and building the report."""
         self.revenue_field_id = revenue_field_id
         self.state_field_id = state_field_id
 
@@ -107,6 +110,7 @@ class LeadReporter:
         start: date,
         end: date,
     ) -> list[dict[str, Any]]:
+        """Paginate POST /data/search/ until cursor is exhausted."""
         all_rows: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
@@ -131,6 +135,7 @@ class LeadReporter:
 
     @staticmethod
     def median(values: list[float]) -> float | None:
+        """Median of a non-empty list; None if empty."""
         if not values:
             return None
         s = sorted(values)
@@ -142,6 +147,7 @@ class LeadReporter:
 
     @staticmethod
     def format_currency(n: float | None) -> str:
+        """US-style $x,xxx.xx for report cells; empty string if None."""
         if n is None:
             return ""
         return f"${n:,.2f}"
@@ -151,7 +157,7 @@ class LeadReporter:
         leads: list[tuple[str, float | None, str | None]],
         output_path: Path,
     ) -> None:
-        """Group by state; write CSV matching sample columns."""
+        """Aggregate leads by US state: counts, top revenue lead, total and median revenue."""
         by_state: dict[str, list[tuple[str, float]]] = {}
         for name, rev, st in leads:
             key = (st or "").strip() or "(no state)"
@@ -193,6 +199,7 @@ def filter_snapshots_by_date_range(
     start: date,
     end: date,
 ) -> list[ImportedLeadSnapshot]:
+    """Keep snapshots whose founded date (ISO) is within [start, end]."""
     out: list[ImportedLeadSnapshot] = []
     for s in snaps:
         if not s.founded:
@@ -213,10 +220,7 @@ def merge_search_with_snapshots(
     start: date,
     end: date,
 ) -> list[tuple[str, float | None, str | None]]:
-    """
-    Build report rows from search hits (org-wide, in date range), then add any
-    in-range imported leads missing from search (index lag).
-    """
+    """Rows (name, revenue, state) from search, plus in-range imports absent from search."""
     tuples: list[tuple[str, float | None, str | None]] = []
     seen_ids: set[str] = set()
     for row in search_rows:
@@ -253,7 +257,7 @@ def run_search_with_retries(
     end: date,
     max_attempts: int = 5,
 ) -> list[dict[str, Any]]:
-    """POST /data/search/ with retries on HTTP errors."""
+    """Call find_leads_in_date_range with backoff on HTTP errors (e.g. transient failures)."""
     last_err: Exception | None = None
     for attempt in range(max_attempts):
         try:

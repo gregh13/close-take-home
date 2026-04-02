@@ -32,6 +32,7 @@ from close_crm.reporting import (
 
 
 def main() -> None:
+    """Parse CLI, import CSV into Close, run founded-date search, write state report CSV."""
     parser = argparse.ArgumentParser(
         description="Import CSV into Close, then write state revenue report for a founded-date range."
     )

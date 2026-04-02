@@ -14,6 +14,7 @@ class CloseAPI:
     """Thin wrapper around Close REST API with Basic auth and 429 handling."""
 
     def __init__(self, api_key: str, base_url: str = API_BASE) -> None:
+        """Auth as Basic (api_key, empty password); JSON headers; optional alternate base URL."""
         self._session = requests.Session()
         self._session.auth = (api_key, "")
         self._session.headers.update(
@@ -30,6 +31,7 @@ class CloseAPI:
         json_body: dict[str, Any] | list[Any] | None = None,
         max_retries: int = 6,
     ) -> Any:
+        """HTTP request with retries on 429 and 5xx; logs error bodies; returns JSON or None."""
         url = path if path.startswith("http") else f"{self._base}{path if path.startswith('/') else '/' + path}"
         attempt = 0
         while attempt < max_retries:
@@ -54,9 +56,11 @@ class CloseAPI:
         raise RuntimeError(f"Request failed after retries: {method} {url}")
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """GET relative path or absolute URL."""
         return self.request("GET", path, params=params)
 
     def post(self, path: str, json_body: dict[str, Any] | None = None) -> Any:
+        """POST JSON body to path or absolute URL."""
         return self.request("POST", path, json_body=json_body)
 
     def list_lead_custom_fields(self) -> list[dict[str, Any]]:
@@ -80,9 +84,11 @@ class CloseAPI:
         return out
 
     def create_lead_custom_field(self, name: str, field_type: str) -> dict[str, Any]:
+        """POST /custom_field/lead/ — create a lead-level custom field."""
         return self.post("/custom_field/lead/", json_body={"name": name, "type": field_type})
 
     def create_lead(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST /lead/ — create a lead (nested contacts and custom.* fields allowed)."""
         result = self.post("/lead/", json_body=payload)
         if not isinstance(result, dict):
             raise RuntimeError("Unexpected response from POST /lead/")

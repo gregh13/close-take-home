@@ -26,6 +26,7 @@ class CSVImporter:
         self.input_path = Path(input_path)
 
     def load(self) -> list[dict[str, str]]:
+        """Read CSV as dict rows (UTF-8); empty list if no header."""
         with self.input_path.open(newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             if reader.fieldnames is None:
@@ -33,6 +34,7 @@ class CSVImporter:
             return [dict(row) for row in reader]
 
     def normalize_all(self, rows: list[dict[str, str]]) -> list[CleanRow]:
+        """Apply normalize_row per row; row numbers start at 2 (header is row 1)."""
         cleaned: list[CleanRow] = []
         for i, row in enumerate(rows, start=2):
             c = normalize_row(row, i)
@@ -41,6 +43,7 @@ class CSVImporter:
         return cleaned
 
     def group_by_company(self, rows: list[CleanRow]) -> dict[str, GroupedCompany]:
+        """Preserve first-seen company order; merge contacts; warn on conflicting attributes."""
         order: list[str] = []
         buckets: dict[str, GroupedCompany] = {}
 
@@ -88,6 +91,7 @@ class CSVImporter:
         return {k: buckets[k] for k in order}
 
     def write_normalized_csv(self, grouped: dict[str, GroupedCompany], out_path: Path) -> None:
+        """Write one row per contact with company-level custom fields repeated."""
         out_path.parent.mkdir(parents=True, exist_ok=True)
         fieldnames = [
             "Company",
@@ -116,7 +120,7 @@ class CSVImporter:
                     )
 
     def ensure_custom_fields(self, api: CloseAPI) -> dict[str, str]:
-        """Return mapping CSV column name -> cf_id."""
+        """Ensure CUSTOM_FIELD_SPECS exist in Close; return csv column key -> custom field id."""
         existing = api.list_lead_custom_fields()
         by_norm: dict[str, dict[str, Any]] = {}
         for item in existing:
@@ -152,6 +156,7 @@ class CSVImporter:
     def build_lead_payload(
         self, g: GroupedCompany, field_map: dict[str, str]
     ) -> dict[str, Any]:
+        """JSON body for POST /lead/: name, contacts, and custom.cf_<id> from field_map."""
         contacts: list[dict[str, Any]] = []
         for c in g.contacts:
             entry: dict[str, Any] = {"name": c.name}
@@ -189,6 +194,7 @@ def import_leads(
     grouped: dict[str, GroupedCompany],
     field_map: dict[str, str],
 ) -> list[ImportedLeadSnapshot]:
+    """Create one Close lead per grouped company; return ids and fields for reporting."""
     snapshots: list[ImportedLeadSnapshot] = []
     for _k, g in grouped.items():
         payload = importer.build_lead_payload(g, field_map)

@@ -1,4 +1,4 @@
-"""Paths, API constants, and shared logging."""
+"""Default file paths, Close API base URL, custom-field mapping, and module logger."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ DEFAULT_OUTPUT = _SRC_DIR / "data" / "output" / "report.csv"
 DEFAULT_NORMALIZED = _SRC_DIR / "data" / "normalized" / "normalized_import.csv"
 API_BASE = "https://api.close.com/api/v1"
 
-# CSV column -> Close Lead Custom Field (name, type)
+# (csv_column_key, Close field label, Close field type) — used when creating/finding fields
 CUSTOM_FIELD_SPECS: list[tuple[str, str, str]] = [
     ("custom.Company Founded", "Company Founded", "date"),
     ("custom.Company Revenue", "Company Revenue", "number"),
