@@ -16,7 +16,7 @@ from close_crm.importer import ImportedLeadSnapshot
 
 
 def _custom_key(field_id: str) -> str:
-    """API key for a custom field value on a lead row: custom.<cf_id>."""
+    """Build dict key for a custom field on a lead: ``custom.<cf_id>`` (idempotent if already prefixed)."""
     return f"custom.{field_id}" if not field_id.startswith("custom.") else field_id
 
 
@@ -25,9 +25,10 @@ def _lead_revenue_state(
     revenue_id: str,
     state_id: str,
 ) -> tuple[float | None, str | None]:
-    """Read revenue (number) and state (text) from search result row by field ids."""
+    """Read revenue (number) and state (text) from one Advanced Search lead row."""
     rev_key = _custom_key(revenue_id)
     st_key = _custom_key(state_id)
+    # --- Revenue: coerce int/float/str; None if missing or not numeric ---
     rev = lead.get(rev_key)
     if isinstance(rev, (int, float)):
         revenue = float(rev)
@@ -38,6 +39,7 @@ def _lead_revenue_state(
             revenue = float(rev)
         except (TypeError, ValueError):
             revenue = None
+    # --- State: optional text custom field ---
     st = lead.get(st_key)
     state = str(st).strip() if st else None
     return revenue, state or None
@@ -53,6 +55,10 @@ def build_search_body(
     limit: int = 200,
 ) -> dict[str, Any]:
     """Build Advanced Search body: leads whose *Company Founded* custom date falls in [start, end]."""
+    # -------------------------------------------------------------------------
+    # POST /data/search/: object_type=lead AND founded custom field in date range.
+    # _fields limits payload; sort stabilizes pagination; cursor added when paging.
+    # -------------------------------------------------------------------------
     return {
         "query": {
             "type": "and",
@@ -98,6 +104,8 @@ def build_search_body(
 class LeadReporter:
     """Search leads in date range and write state aggregation CSV."""
 
+    # Uses build_search_body + CloseAPI.search_data; median/format_currency for CSV cells.
+
     def __init__(self, revenue_field_id: str, state_field_id: str) -> None:
         """Ids for custom fields used when reading search rows and building the report."""
         self.revenue_field_id = revenue_field_id
@@ -111,6 +119,9 @@ class LeadReporter:
         end: date,
     ) -> list[dict[str, Any]]:
         """Paginate POST /data/search/ until cursor is exhausted."""
+        # -------------------------------------------------------------------------
+        # Cursor loop: each response may include partial lead rows + next cursor.
+        # -------------------------------------------------------------------------
         all_rows: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
@@ -135,7 +146,7 @@ class LeadReporter:
 
     @staticmethod
     def median(values: list[float]) -> float | None:
-        """Median of a non-empty list; None if empty."""
+        """Median of a non-empty list; None if empty (used per state in generate_report)."""
         if not values:
             return None
         s = sorted(values)
@@ -150,6 +161,7 @@ class LeadReporter:
         """US-style $x,xxx.xx for report cells; empty string if None."""
         if n is None:
             return ""
+        # Total and median columns are written as formatted strings, not raw floats.
         return f"${n:,.2f}"
 
     def generate_report(
@@ -158,12 +170,18 @@ class LeadReporter:
         output_path: Path,
     ) -> None:
         """Aggregate leads by US state: counts, top revenue lead, total and median revenue."""
+        # -------------------------------------------------------------------------
+        # 1. Bucket by state; missing/blank state -> "(no state)"; None revenue -> 0 for stats.
+        # -------------------------------------------------------------------------
         by_state: dict[str, list[tuple[str, float]]] = {}
         for name, rev, st in leads:
             key = (st or "").strip() or "(no state)"
             r = rev if rev is not None else 0.0
             by_state.setdefault(key, []).append((name, r))
 
+        # -------------------------------------------------------------------------
+        # 2. One output row per state: count, argmax revenue name, sum, median.
+        # -------------------------------------------------------------------------
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fieldnames = [
             "US State",
@@ -200,6 +218,7 @@ def filter_snapshots_by_date_range(
     end: date,
 ) -> list[ImportedLeadSnapshot]:
     """Keep snapshots whose founded date (ISO) is within [start, end]."""
+    # Aligns import-time founded values with the same window used for Advanced Search.
     out: list[ImportedLeadSnapshot] = []
     for s in snaps:
         if not s.founded:
@@ -221,6 +240,9 @@ def merge_search_with_snapshots(
     end: date,
 ) -> list[tuple[str, float | None, str | None]]:
     """Rows (name, revenue, state) from search, plus in-range imports absent from search."""
+    # -------------------------------------------------------------------------
+    # 1. Everything the search API returned (org-wide, in founded-date range).
+    # -------------------------------------------------------------------------
     tuples: list[tuple[str, float | None, str | None]] = []
     seen_ids: set[str] = set()
     for row in search_rows:
@@ -236,6 +258,9 @@ def merge_search_with_snapshots(
         )
         tuples.append((str(name), rev, st))
 
+    # -------------------------------------------------------------------------
+    # 2. In-range imports not yet in search results (index lag); same tuple shape.
+    # -------------------------------------------------------------------------
     ours_in_range = filter_snapshots_by_date_range(snapshots, start, end)
     for s in ours_in_range:
         if s.lead_id in seen_ids:
@@ -258,6 +283,7 @@ def run_search_with_retries(
     max_attempts: int = 5,
 ) -> list[dict[str, Any]]:
     """Call find_leads_in_date_range with backoff on HTTP errors (e.g. transient failures)."""
+    # Exponential-ish sleep between attempts; logs response body for debugging.
     last_err: Exception | None = None
     for attempt in range(max_attempts):
         try:

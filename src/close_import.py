@@ -33,6 +33,12 @@ from close_crm.reporting import (
 
 def main() -> None:
     """Parse CLI, import CSV into Close, run founded-date search, write state report CSV."""
+
+    # -------------------------------------------------------------------------
+    # 1. Command-line interface
+    # -------------------------------------------------------------------------
+    # Defines paths, the founded-date window for the *report* search, optional
+    # delay before hitting search (index lag), and verbosity.
     parser = argparse.ArgumentParser(
         description="Import CSV into Close, then write state revenue report for a founded-date range."
     )
@@ -55,20 +61,35 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args()
 
+    # -------------------------------------------------------------------------
+    # 2. Logging
+    # -------------------------------------------------------------------------
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(message)s",
     )
 
+    # -------------------------------------------------------------------------
+    # 3. Environment & API credentials
+    # -------------------------------------------------------------------------
+    # Load .env from the current working directory (if present); read CLOSE_API_KEY.
     load_dotenv()
     api_key = (os.environ.get("CLOSE_API_KEY") or "").strip()
     if not api_key:
         raise SystemExit("CLOSE_API_KEY is not set. Add it to .env or the environment.")
 
+    # -------------------------------------------------------------------------
+    # 4. Report date range (CLI)
+    # -------------------------------------------------------------------------
+    # Used later for Advanced Search on *Company Founded* and for merging snapshots.
+    # Not the same as dates inside the CSV rows (those are per-lead attributes).
     start_d = parse_iso_date(args.start_date)
     end_d = parse_iso_date(args.end_date)
     validate_date_range(start_d, end_d)
 
+    # -------------------------------------------------------------------------
+    # 5. CSV: load, normalize, group by company, write normalized file
+    # -------------------------------------------------------------------------
     importer = CSVImporter(args.input)
     raw_rows = importer.load()
     cleaned = importer.normalize_all(raw_rows)
@@ -76,14 +97,26 @@ def main() -> None:
     importer.write_normalized_csv(grouped, args.normalized)
     LOG.info("Wrote normalized CSV: %s", args.normalized)
 
+    # -------------------------------------------------------------------------
+    # 6. Close API client & lead custom fields
+    # -------------------------------------------------------------------------
+    # Ensure required custom fields exist (or match types), then resolve ids for
+    # payload keys and for search/report field references.
     api = CloseAPI(api_key)
     field_map = importer.ensure_custom_fields(api)
     founded_id = field_map["custom.Company Founded"]
     revenue_id = field_map["custom.Company Revenue"]
     state_id = field_map["Company US State"]
 
+    # -------------------------------------------------------------------------
+    # 7. Create leads (one per company in the grouped data)
+    # -------------------------------------------------------------------------
     snapshots = import_leads(api, importer, grouped, field_map)
 
+    # -------------------------------------------------------------------------
+    # 8. Search, merge with import snapshots, write report CSV
+    # -------------------------------------------------------------------------
+    # Optional sleep gives Close search indexing time to catch new leads.
     reporter = LeadReporter(revenue_field_id=revenue_id, state_field_id=state_id)
     time.sleep(args.search_delay)
     search_rows = run_search_with_retries(
