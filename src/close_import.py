@@ -18,8 +18,8 @@ from dotenv import load_dotenv
 from close_crm.config import (
     DEFAULT_INPUT,
     DEFAULT_NORMALIZED,
-    DEFAULT_OUTPUT,
     LOG,
+    default_report_output_path,
 )
 from close_crm.dates import parse_iso_date, validate_date_range
 from close_crm.api import CloseAPI
@@ -45,7 +45,14 @@ def main() -> None:
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD (inclusive)")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD (inclusive)")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT, help="Input CSV path")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Report CSV path")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help=(
+            "Report CSV path (default: src/data/output/report_<start>_<end>.csv from --start-date/--end-date)"
+        ),
+    )
     parser.add_argument(
         "--normalized",
         type=Path,
@@ -59,6 +66,11 @@ def main() -> None:
         help="Seconds to wait after import before searching (default 3)",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    parser.add_argument(
+        "--include-no-state",
+        action="store_true",
+        help="Include leads with blank US state in the report (default: omit them; bucket as '(no state)' when set)",
+    )
     args = parser.parse_args()
 
     # -------------------------------------------------------------------------
@@ -86,6 +98,10 @@ def main() -> None:
     start_d = parse_iso_date(args.start_date)
     end_d = parse_iso_date(args.end_date)
     validate_date_range(start_d, end_d)
+
+    # Default report path: data/output/report_<start>_<end>.csv (unique per range).
+    if args.output is None:
+        args.output = default_report_output_path(start_d, end_d)
 
     # -------------------------------------------------------------------------
     # 5. CSV: load, normalize, group by company, write normalized file
@@ -117,6 +133,7 @@ def main() -> None:
     # 8. Search, merge with import snapshots, write report CSV
     # -------------------------------------------------------------------------
     # Optional sleep gives Close search indexing time to catch new leads.
+    # By default omit leads with blank US state; --include-no-state buckets them as "(no state)".
     reporter = LeadReporter(revenue_field_id=revenue_id, state_field_id=state_id)
     time.sleep(args.search_delay)
     search_rows = run_search_with_retries(
@@ -125,7 +142,11 @@ def main() -> None:
     report_rows = merge_search_with_snapshots(
         reporter, search_rows, snapshots, start_d, end_d
     )
-    reporter.generate_report(report_rows, args.output)
+    reporter.generate_report(
+        report_rows,
+        args.output,
+        include_leads_without_state=args.include_no_state,
+    )
     LOG.info("Wrote report: %s", args.output)
 
 

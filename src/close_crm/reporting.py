@@ -168,14 +168,20 @@ class LeadReporter:
         self,
         leads: list[tuple[str, float | None, str | None]],
         output_path: Path,
+        *,
+        include_leads_without_state: bool = False,
     ) -> None:
         """Aggregate leads by US state: counts, top revenue lead, total and median revenue."""
         # -------------------------------------------------------------------------
-        # 1. Bucket by state; missing/blank state -> "(no state)"; None revenue -> 0 for stats.
+        # 1. Bucket by state; missing/blank state -> "(no state)" only if opted in;
+        #    otherwise skip those rows (report is state-centric). None revenue -> 0 for stats.
         # -------------------------------------------------------------------------
         by_state: dict[str, list[tuple[str, float]]] = {}
         for name, rev, st in leads:
-            key = (st or "").strip() or "(no state)"
+            state_label = (st or "").strip()
+            if not state_label and not include_leads_without_state:
+                continue
+            key = state_label or "(no state)"
             r = rev if rev is not None else 0.0
             by_state.setdefault(key, []).append((name, r))
 
@@ -190,6 +196,12 @@ class LeadReporter:
             "Total revenue",
             "Median revenue",
         ]
+        if not by_state:
+            LOG.warning(
+                "Report has no rows (no leads with a US state in range, or empty input). "
+                "Use --include-no-state to add leads with blank state."
+            )
+
         with output_path.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames)
             w.writeheader()

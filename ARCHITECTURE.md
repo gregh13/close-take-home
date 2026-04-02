@@ -9,7 +9,7 @@ The tool does four things in sequence:
 1. **Read and clean** a CSV of companies and contacts.
 2. **Write** a normalized CSV and **ensure** the right lead custom fields exist in Close.
 3. **Create leads** in Close (one lead per company, contacts nested).
-4. **Search** Close for leads in a **founded-date range**, merge results with what was just imported (to handle search index lag), and **write** an aggregated report by US state.
+4. **Search** Close **org-wide** for leads in a **founded-date range**, merge results with what was just imported (to handle search index lag), and **write** an aggregated report by US state. By default, leads with no **US State** value are **excluded** from that report; the CLI can include them in a **`(no state)`** bucket.
 
 The **entry point** is `src/close_import.py`. All reusable logic lives in the **`close_crm`** package under `src/close_crm/`.
 
@@ -19,13 +19,13 @@ The **entry point** is `src/close_import.py`. All reusable logic lives in the **
 
 | Module | Role |
 |--------|------|
-| **`close_import.py`** | CLI (`argparse`), env (`CLOSE_API_KEY`), logging setup, and the ordered call chain only. |
-| **`close_crm/config.py`** | Default paths, API base URL, custom-field specs (`CUSTOM_FIELD_SPECS`), shared logger name. |
+| **`close_import.py`** | CLI (`argparse`), env (`CLOSE_API_KEY`), logging, default report path from date range (`default_report_output_path`), and the ordered call chain. |
+| **`close_crm/config.py`** | Default input/normalized paths, `default_report_output_path`, API base URL, `CUSTOM_FIELD_SPECS`, shared logger name. |
 | **`close_crm/dates.py`** | Parse CLI dates (`YYYY-MM-DD`) and validate an inclusive range. |
 | **`close_crm/api.py`** | `CloseAPI`: HTTP session (Basic auth), retries on 429/5xx, wrappers for REST endpoints used by the tool. |
 | **`close_crm/normalization.py`** | Parse emails, phones, money, founded dates; title-case names; `CleanRow` / `GroupedCompany` structures; row-level validation. |
 | **`close_crm/importer.py`** | `CSVImporter`: load CSV, normalize, group by company, write normalized file, build `POST /lead/` payloads, `import_leads()` loop and `ImportedLeadSnapshot` records. |
-| **`close_crm/reporting.py`** | Advanced Search query for founded-date range, `LeadReporter` (pagination, aggregates), merge search + snapshots, CSV report output. |
+| **`close_crm/reporting.py`** | Advanced Search query for founded-date range, `LeadReporter` (pagination, aggregates), merge search + snapshots, CSV report (optional inclusion of blank-state leads). |
 
 There is no separate `close_import` **package**: that name is reserved for the script file. The library package is named **`close_crm`** to avoid import clashes (`close_import.py` vs `close_import/`).
 
@@ -100,7 +100,7 @@ So layers are: **config → (dates | api | normalization) → importer → repor
 
 3. **Reusability** — `normalize_row`, `build_search_body`, or `CloseAPI` can be imported from another script or tests without pulling in the full CLI.
 
-4. **Readable orchestration** — `close_import.py` reads as a short script: parse args → validate dates → import CSV → create leads → search → report. Details live in `close_crm`, not in a single large file.
+4. **Readable orchestration** — `close_import.py` reads as a short script: parse args → validate dates → resolve default report path → import CSV → create leads → search → merge → report. Details live in `close_crm`, not in a single large file.
 
 5. **Package vs script naming** — Using a distinct package name (`close_crm`) keeps `src/close_import.py` as a runnable entry point while still allowing `import close_crm` from `PYTHONPATH=src`.
 
@@ -114,14 +114,15 @@ So layers are: **config → (dates | api | normalization) → importer → repor
 | `GroupedCompany` map | `CSVImporter` | Normalized CSV writer, `build_lead_payload`, `import_leads` |
 | `field_map` (csv column → `cf_*` id) | `ensure_custom_fields` | Payload builder + reporting (`_custom_key` / search fields) |
 | `ImportedLeadSnapshot` list | `import_leads` | `merge_search_with_snapshots` |
-| Search rows | `LeadReporter.find_leads_in_date_range` | Same merge, then `generate_report` |
+| Search rows | `LeadReporter.find_leads_in_date_range` | `merge_search_with_snapshots`, then `generate_report` |
+| Report row tuples | `merge_search_with_snapshots` | `generate_report` (optional filter for blank US state) |
 
 ---
 
 ## Extension points
 
 - **New CSV columns** — extend `normalization` + `CUSTOM_FIELD_SPECS` + payload building in `importer`.
-- **Different report** — change `LeadReporter.generate_report` or the merge logic in `reporting` without touching API or CSV parsing.
+- **Different report** — change `LeadReporter.generate_report` (e.g. `include_leads_without_state`) or the merge logic in `reporting` without touching API or CSV parsing.
 - **Alternate transports** — swap or subclass `CloseAPI` if mocking or a different base URL is needed.
 
 For day-to-day usage, see [README.md](README.md).

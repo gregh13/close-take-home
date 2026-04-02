@@ -1,6 +1,6 @@
 # Close CRM CSV import and report
 
-This project reads a CSV of companies and contacts, cleans the data, creates **leads** in [Close](https://close.com/) (with the right custom fields), then writes a **summary report** by US state for leads whose **company founded** date falls in a date range you choose.
+This project reads a CSV of companies and contacts, cleans the data, creates **leads** in [Close](https://close.com/) (with the right custom fields), then writes a **summary report** by US state for leads whose **company founded** date falls in a date range you choose. The report **searches your whole Close organization** for that founded-date range (not only rows from this CSV), then merges in any leads from this import that search has not indexed yet. By default, leads with a **blank US state** are **left out** of the report; use **`--include-no-state`** to add a single **`(no state)`** aggregate row for them.
 
 ---
 
@@ -60,7 +60,7 @@ The script will:
 2. Normalize rows and write a cleaned CSV.
 3. Ensure the required lead custom fields exist in Close (or use existing ones).
 4. Create one lead per company in your Close organization.
-5. After a short pause, search Close for leads in that founded-date range and write the state report.
+5. After a short pause, search Close **org-wide** for leads in that founded-date range, merge with this run’s imports (covers search lag), and write the state report (default filename includes the date range; blank-state leads omitted unless you pass **`--include-no-state`**).
 
 ### 6. Find your outputs
 
@@ -69,7 +69,7 @@ By default (no extra flags):
 | Output | Location |
 |--------|----------|
 | Normalized CSV | `src/data/normalized/normalized_import.csv` |
-| State report CSV | `src/data/output/report.csv` |
+| State report CSV | `src/data/output/report_<start-date>_<end-date>.csv` (from your `--start-date` / `--end-date`, e.g. `report_2020-01-01_2024-12-31.csv`) |
 
 ---
 
@@ -78,9 +78,10 @@ By default (no extra flags):
 | Flag | Meaning |
 |------|--------|
 | `--input PATH` | Input CSV (default: mock file under `src/data/input/`) |
-| `--output PATH` | Report CSV path |
+| `--output PATH` | Report CSV path (default encodes the date range in the filename under `src/data/output/`) |
 | `--normalized PATH` | Normalized intermediate CSV path |
 | `--search-delay SECONDS` | Wait after import before searching Close (default: `3`; helps if search lags) |
+| `--include-no-state` | Put leads with a blank US state into a `(no state)` row (default: **omit** those leads from the report) |
 | `-v` / `--verbose` | More detailed logs |
 
 Example with custom files:
@@ -110,5 +111,7 @@ python src/close_import.py --help
 
 ## Notes
 
-- Running the script **creates real leads** in the Close organization tied to your API key. Use a test org or sandbox if you are experimenting.
+- Running the script **creates real leads** in the Close organization tied to your API key (one lead per distinct company in the CSV). Use a test org or sandbox if you are experimenting.
 - If a custom field already exists but with the **wrong type**, the script stops with an error so you can fix it in Close.
+- If **every** lead in range has a blank US state and you did **not** pass **`--include-no-state`**, the report file will contain **headers only** and the run logs a warning.
+- Run from the **project root** with `python src/close_import.py` so `src` is on the import path (or set `PYTHONPATH=src`).
